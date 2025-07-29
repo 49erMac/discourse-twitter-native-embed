@@ -1,7 +1,7 @@
 import { withPluginApi } from "discourse/lib/plugin-api";
 
 let twitterScriptLoaded = false;
-let pendingEmbeds = new Set();
+let globalObserver = null;
 
 function loadTwitterScript() {
   if (twitterScriptLoaded) return Promise.resolve();
@@ -27,6 +27,7 @@ function loadTwitterScript() {
 function createTwitterPlaceholder(tweetId, originalUrl) {
   const placeholder = document.createElement('div');
   placeholder.className = 'twitter-embed-placeholder';
+  placeholder.setAttribute('data-processed', 'true'); // Mark as processed
   placeholder.style.cssText = `
     border: 1px solid #e1e8ed;
     border-radius: 12px;
@@ -61,6 +62,7 @@ async function loadTwitterEmbed(placeholder) {
   // Create the actual Twitter blockquote
   const blockquote = document.createElement('blockquote');
   blockquote.className = 'twitter-tweet';
+  blockquote.setAttribute('data-processed', 'true'); // Mark as processed
   blockquote.innerHTML = `<a href="${originalUrl}"></a>`;
   
   // Replace placeholder with blockquote
@@ -74,31 +76,40 @@ async function loadTwitterEmbed(placeholder) {
   }
 }
 
-function setupIntersectionObserver() {
-  const observer = new IntersectionObserver((entries) => {
+function setupGlobalIntersectionObserver() {
+  if (globalObserver) return globalObserver;
+  
+  globalObserver = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
       if (entry.isIntersecting) {
         const placeholder = entry.target;
-        observer.unobserve(placeholder);
+        globalObserver.unobserve(placeholder);
         loadTwitterEmbed(placeholder);
       }
     });
   }, {
-    rootMargin: '100px' // Start loading 100px before entering viewport
+    rootMargin: '100px'
   });
   
-  return observer;
+  return globalObserver;
 }
 
 function initializeTwitterNativeEmbed(api) {
-  const observer = setupIntersectionObserver();
+  const observer = setupGlobalIntersectionObserver();
   
   api.decorateCookedElement((element) => {
-    const twitterLinks = element.querySelectorAll('a[href*="twitter.com/"][href*="/status/"], a[href*="x.com/"][href*="/status/"]');
+    // Only process links that haven't been processed yet
+    const twitterLinks = element.querySelectorAll('a[href*="twitter.com/"][href*="/status/"]:not([data-processed]), a[href*="x.com/"][href*="/status/"]:not([data-processed])');
     
     twitterLinks.forEach(link => {
+      // Mark link as processed immediately to prevent re-processing
+      link.setAttribute('data-processed', 'true');
+      
       const onebox = link.closest('.onebox');
       if (!onebox) return;
+      
+      // Skip if onebox already has processed content
+      if (onebox.querySelector('[data-processed]')) return;
       
       const href = link.getAttribute('href');
       let normalizedUrl = href;
@@ -123,12 +134,27 @@ function initializeTwitterNativeEmbed(api) {
       // Start observing the placeholder
       observer.observe(placeholder);
       
-      // Optional: Add click handler for immediate loading
+      // Add click handler for immediate loading
       placeholder.addEventListener('click', () => {
         observer.unobserve(placeholder);
         loadTwitterEmbed(placeholder);
       });
     });
+    
+    // Also check for any existing twitter blockquotes that need processing
+    const existingBlockquotes = element.querySelectorAll('blockquote.twitter-tweet:not([data-processed])');
+    existingBlockquotes.forEach(blockquote => {
+      blockquote.setAttribute('data-processed', 'true');
+      loadTwitterScript().then(() => {
+        if (window.twttr && window.twttr.widgets) {
+          window.twttr.widgets.load(blockquote);
+        }
+      });
+    });
+  }, {
+    id: "twitter-native-embed", // Unique ID for this decorator
+    onlyStream: false, // Process all content, not just new posts
+    afterAdopt: false // Run before adoption to avoid conflicts
   });
 }
 
