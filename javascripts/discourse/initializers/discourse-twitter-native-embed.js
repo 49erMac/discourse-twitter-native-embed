@@ -100,104 +100,85 @@ function setupGlobalIntersectionObserver() {
   return globalObserver;
 }
 
-function processTwitterLinks(element, observer) {
-  // Only process links that haven't been processed yet
-  const twitterLinks = element.querySelectorAll(
-    'a[href*="twitter.com/"][href*="/status/"]:not([data-processed]), a[href*="x.com/"][href*="/status/"]:not([data-processed])'
-  );
-
-  twitterLinks.forEach(link => {
-    // Mark link as processed immediately to prevent re-processing
-    link.setAttribute('data-processed', 'true');
-
-    const onebox = link.closest('.onebox');
-    if (!onebox) return;
-
-    // If already replaced with an embed, skip
-    if (
-      onebox.querySelector('.twitter-tweet[data-embed-loaded="true"]') ||
-      onebox.querySelector('.twitter-embed-placeholder[data-embed-loaded="true"]')
-    ) {
-      return;
-    }
-
-    // Skip if onebox already has processed content
-    if (onebox.querySelector('[data-processed]')) return;
-
-    const href = link.getAttribute('href');
-    let normalizedUrl = href;
-
-    // Normalize x.com to twitter.com
-    if (href.includes('x.com/')) {
-      normalizedUrl = href.replace('x.com/', 'twitter.com/');
-    }
-
-    // Extract tweet ID
-    const match = normalizedUrl.match(/\/status\/(\d+)/);
-    if (!match) return;
-
-    const tweetId = match[1];
-
-    // Create placeholder
-    const placeholder = createTwitterPlaceholder(tweetId, normalizedUrl);
-
-    // Replace onebox with placeholder
-    onebox.parentNode.replaceChild(placeholder, onebox);
-
-    // Start observing the placeholder
-    observer.observe(placeholder);
-
-    // Add click handler for immediate loading
-    placeholder.addEventListener('click', () => {
-      observer.unobserve(placeholder);
-      loadTwitterEmbed(placeholder);
-    });
-  });
-
-  // Also check for any existing twitter blockquotes that need processing
-  const existingBlockquotes = element.querySelectorAll('blockquote.twitter-tweet[data-embed-loaded="true"]');
-  existingBlockquotes.forEach(blockquote => {
-    // Already embedded, do nothing
-  });
-
-  // For legacy blockquotes that are not marked, mark them as embedded
-  const legacyBlockquotes = element.querySelectorAll('blockquote.twitter-tweet:not([data-embed-loaded])');
-  legacyBlockquotes.forEach(blockquote => {
-    blockquote.setAttribute('data-embed-loaded', 'true');
-    blockquote.setAttribute('data-processed', 'true');
-    loadTwitterScript().then(() => {
-      if (window.twttr && window.twttr.widgets) {
-        window.twttr.widgets.load(blockquote);
-      }
-    });
-  });
-}
-
 function initializeTwitterNativeEmbed(api) {
   const observer = setupGlobalIntersectionObserver();
 
-  // Use the new post stream API for cooked post processing
-  if (api.decorateCooked) {
-    api.decorateCooked(
-      ($elem, helper) => {
-        processTwitterLinks($elem, observer);
-      },
-      {
-        id: "twitter-native-embed",
-        onlyStream: false,
-        afterAdopt: false,
-      }
+  api.decorateCookedElement((element) => {
+    // Only process links that haven't been processed yet
+    const twitterLinks = element.querySelectorAll(
+      'a[href*="twitter.com/"][href*="/status/"]:not([data-processed]), a[href*="x.com/"][href*="/status/"]:not([data-processed])'
     );
-  } else {
-    // Fallback for older Discourse versions
-    api.decorateCookedElement((element) => {
-      processTwitterLinks(element, observer);
-    }, {
-      id: "twitter-native-embed",
-      onlyStream: false,
-      afterAdopt: false,
+
+    twitterLinks.forEach(link => {
+      // Mark link as processed immediately to prevent re-processing
+      link.setAttribute('data-processed', 'true');
+
+      const onebox = link.closest('.onebox');
+      if (!onebox) return;
+
+      // If already replaced with an embed, skip
+      if (
+        onebox.querySelector('.twitter-tweet[data-embed-loaded="true"]') ||
+        onebox.querySelector('.twitter-embed-placeholder[data-embed-loaded="true"]')
+      ) {
+        return;
+      }
+
+      // Skip if onebox already has processed content
+      if (onebox.querySelector('[data-processed]')) return;
+
+      const href = link.getAttribute('href');
+      let normalizedUrl = href;
+
+      // Normalize x.com to twitter.com
+      if (href.includes('x.com/')) {
+        normalizedUrl = href.replace('x.com/', 'twitter.com/');
+      }
+
+      // Extract tweet ID
+      const match = normalizedUrl.match(/\/status\/(\d+)/);
+      if (!match) return;
+
+      const tweetId = match[1];
+
+      // Create placeholder
+      const placeholder = createTwitterPlaceholder(tweetId, normalizedUrl);
+
+      // Replace onebox with placeholder
+      onebox.parentNode.replaceChild(placeholder, onebox);
+
+      // Start observing the placeholder
+      observer.observe(placeholder);
+
+      // Add click handler for immediate loading
+      placeholder.addEventListener('click', () => {
+        observer.unobserve(placeholder);
+        loadTwitterEmbed(placeholder);
+      });
     });
-  }
+
+    // Also check for any existing twitter blockquotes that need processing
+    const existingBlockquotes = element.querySelectorAll('blockquote.twitter-tweet[data-embed-loaded="true"]');
+    existingBlockquotes.forEach(blockquote => {
+      // Already embedded, do nothing
+    });
+
+    // For legacy blockquotes that are not marked, mark them as embedded
+    const legacyBlockquotes = element.querySelectorAll('blockquote.twitter-tweet:not([data-embed-loaded])');
+    legacyBlockquotes.forEach(blockquote => {
+      blockquote.setAttribute('data-embed-loaded', 'true');
+      blockquote.setAttribute('data-processed', 'true');
+      loadTwitterScript().then(() => {
+        if (window.twttr && window.twttr.widgets) {
+          window.twttr.widgets.load(blockquote);
+        }
+      });
+    });
+  }, {
+    id: "twitter-native-embed", // Unique ID for this decorator
+    onlyStream: false, // Process all content, not just new posts
+    afterAdopt: false // Run before adoption to avoid conflicts
+  });
 }
 
 export default {
